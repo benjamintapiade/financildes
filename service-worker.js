@@ -1,7 +1,7 @@
 /* Financildes service worker.
    Estrategia: app shell cacheado. Los datos viven en localStorage (no aquí).
    Sube la versión de CACHE cada vez que cambies archivos para forzar refresco. */
-const CACHE = 'financildes-v4';
+const CACHE = 'financildes-v5';
 const SHELL = [
   './',
   './index.html',
