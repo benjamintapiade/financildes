@@ -98,6 +98,7 @@
   .catbtn .cc .icon{width:21px;height:21px;}
   .catbtn .cl{font-size:9px;line-height:1.15;color:var(--tx-2);max-width:58px;text-align:center;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .catbtn .cp{font-size:11px;font-weight:600;line-height:1.1;color:var(--tx);}
   .catbtn:active .cc{background:var(--bg-4);border-color:var(--accent);}
 
   .legrow{display:flex;align-items:center;gap:11px;padding:9px 6px;border-radius:var(--r-sm);}
@@ -168,6 +169,22 @@
   .txrow .amt.exp{color:var(--tx-2);}
   .empty{text-align:center;color:var(--tx-3);padding:60px 30px;font-size:14px;}
   .empty .big{display:block;margin-bottom:6px;color:var(--tx-2);font-size:15px;font-weight:500;}
+
+  /* Movimientos por categoría */
+  .catrow{display:flex;align-items:center;gap:12px;padding:12px 13px;background:var(--bg-2);
+    border:1px solid var(--line);border-radius:var(--r-sm);margin-bottom:8px;}
+  .catrow:active{background:var(--bg-3);}
+  .catrow .ci{width:38px;height:38px;border-radius:10px;background:var(--bg-3);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;flex:none;}
+  .catrow .ci .icon{width:19px;height:19px;}
+  .catrow .mid{flex:1;min-width:0;}
+  .catrow .mid .t1{font-weight:500;}
+  .catrow .mid .t2{font-size:12px;color:var(--tx-3);margin-top:1px;}
+  .catrow .amt{font-weight:600;flex:none;}
+  .catrow .amt.inc{color:var(--tx);} .catrow .amt.exp{color:var(--tx-2);}
+  .catrow .exp-ch{width:18px;height:18px;color:var(--tx-3);flex:none;transition:transform .15s;}
+  .catrow .exp-ch.op{transform:rotate(90deg);}
+  .catexp{margin:-2px 6px 10px;padding:0 6px;border-left:2px solid var(--line);}
 
   /* ---------- manage ---------- */
   .subtabs{display:flex;gap:6px;padding:14px 16px 4px;}
@@ -311,7 +328,7 @@ function todayISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMo
 function seed(){
   const cat=(name,kind,icon,g)=>({id:uid(),name,kind,icon,color:GRAYS[g],archived:false});
   return {
-    meta:{version:1,currency:'CLP',createdAt:nowISO(),lastModified:nowISO()},
+    meta:{version:1,currency:'CLP',defaultCardId:null,createdAt:nowISO(),lastModified:nowISO()},
     cards:[
       {id:uid(),name:'Efectivo',type:'debito',icon:'banknote',opening:0,createdAt:nowISO()}
     ],
@@ -342,7 +359,8 @@ function save(){DB.meta.lastModified=nowISO();
 let DB=load();
 
 /* ---------- Estado de interfaz ---------- */
-const UI={view:'home', period:'mes', anchor:new Date(), manageTab:'cat'};
+const UI={view:'home', period:'mes', anchor:new Date(), manageTab:'cat',
+  listFilter:'todos', listGroup:'fecha', expandedCat:null};
 
 /* ---------- Dinero (CLP, sin decimales) ---------- */
 const nf=new Intl.NumberFormat('es-CL');
@@ -371,6 +389,11 @@ function cardBalance(cardId){
   return b;
 }
 function disponible(){return DB.cards.reduce((s,c)=>s+cardBalance(c.id),0);}
+/* tarjeta por defecto configurable (cae a la primera si no hay) */
+function defaultCardId(){
+  if(DB.meta.defaultCardId&&DB.cards.some(c=>c.id===DB.meta.defaultCardId))return DB.meta.defaultCardId;
+  return (DB.cards[0]&&DB.cards[0].id)||'';
+}
 
 /* Saldo con una persona: + = te debe (por cobrar) · − = le debes (por pagar) */
 function personEffect(t){
@@ -468,7 +491,7 @@ function renderHome(){
     '<button data-shift="-1">'+svg('chevron-left')+'</button>'+
     '<div class="lbl">'+label+'</div>'+
     '<button data-shift="1">'+svg('chevron-right')+'</button></div>';
-  /* dona con anillo de categorías de gasto alrededor (tap para registrar) */
+  /* dona con anillo de categorías de gasto alrededor (tap para registrar, % del gasto del periodo) */
   const expCats=DB.categories.filter(c=>c.kind==='gasto'&&!c.archived);
   let ring='';
   const n=expCats.length;
@@ -477,9 +500,11 @@ function renderHome(){
       const ang=(-90 + i*360/n)*Math.PI/180;
       const leftPct=(50+38*Math.cos(ang)).toFixed(2);
       const topPct=(50+38*Math.sin(ang)).toFixed(2);
+      const monto=byCat[c.id]||0;
+      const pct=(totalGasto&&monto)?Math.round(monto/totalGasto*100):0;
       ring+='<button class="catbtn" data-addcat="'+c.id+'" style="left:'+leftPct+'%;top:'+topPct+'%">'+
         '<span class="cc" style="color:'+c.color+'">'+svg(c.icon)+'</span>'+
-        '<span class="cl">'+esc(c.name)+'</span></button>';
+        (pct>0?'<span class="cp">'+pct+'%</span>':'<span class="cl">'+esc(c.name)+'</span>')+'</button>';
     });
   }
   html+='<div class="donutwrap"><div class="donutarea">'+ring+
@@ -488,18 +513,6 @@ function renderHome(){
     '<div class="cdiv"></div>'+
     '<div class="cexp">−'+clp(totalGasto).replace('-','')+'</div>'+
     '</div></div></div>';
-  /* leyenda (desglose con %) */
-  if(segs.length){
-    html+='<div class="legend">'+segs.map(s=>{
-      const pct=totalGasto?Math.round(s.amount/totalGasto*100):0;
-      return '<div class="legrow">'+
-        '<span class="dot" style="background:'+s.c.color+'"></span>'+
-        '<span class="ci">'+svg(s.c.icon)+'</span>'+
-        '<span class="nm">'+esc(s.c.name)+'</span>'+
-        '<span class="pct">'+pct+'%</span>'+
-        '<span class="am">'+clp(s.amount)+'</span></div>';
-    }).join('')+'</div>';
-  }
   html+='</div>';
   /* tarjetas */
   html+='<div class="section-h"><span class="ttl">Tarjetas</span>'+
@@ -536,22 +549,43 @@ function donutSVG(segs,total,size){
 /* ---------- Lista de movimientos ---------- */
 function renderList(){
   const {label}=periodRange();
-  const tx=txInPeriod().slice().sort((a,b)=> (a.date<b.date?1:a.date>b.date?-1:(b.createdAt||'').localeCompare(a.createdAt||'')));
+  const all=txInPeriod().slice().sort((a,b)=> (a.date<b.date?1:a.date>b.date?-1:(b.createdAt||'').localeCompare(a.createdAt||'')));
   let html='<div class="pnav">'+
     '<button data-shift="-1">'+svg('chevron-left')+'</button>'+
     '<div class="lbl">'+label+'</div>'+
     '<button data-shift="1">'+svg('chevron-right')+'</button></div>';
 
+  /* controles: filtro por tipo + agrupación */
+  const filters=[['todos','Todos'],['gasto','Gastos'],['ingreso','Ingresos']];
+  html+='<div class="periods" style="padding:2px 16px 8px">'+filters.map(f=>
+    '<button class="chip '+(UI.listFilter===f[0]?'on':'')+'" data-lfilter="'+f[0]+'">'+f[1]+'</button>').join('')+
+    '<span style="flex:1"></span>'+
+    '<button class="chip '+(UI.listGroup==='fecha'?'on':'')+'" data-lgroup="fecha">'+svg('calendar')+'</button>'+
+    '<button class="chip '+(UI.listGroup==='categoria'?'on':'')+'" data-lgroup="categoria">'+svg('tag')+'</button>'+
+    '</div>';
+
+  /* aplicar filtro por tipo */
+  let tx=all;
+  if(UI.listFilter==='gasto')tx=all.filter(t=>t.kind==='gasto');
+  else if(UI.listFilter==='ingreso')tx=all.filter(t=>t.kind==='ingreso');
+
   if(!tx.length){
-    html+='<div class="empty"><span class="big">Aún no hay movimientos aquí</span>'+
-      'Toca Gasto o Ingreso abajo para registrar el primero.</div>';
+    html+='<div class="empty"><span class="big">Sin movimientos en este periodo</span>'+
+      (UI.listFilter==='todos'?'Toca Gasto o Ingreso abajo para registrar el primero.':'Prueba con otro filtro o periodo.')+'</div>';
     $('#main').innerHTML=html; return;
   }
-  /* agrupar por día */
+
+  if(UI.listGroup==='categoria') html+=listByCategory(tx);
+  else html+=listByDate(tx);
+
+  $('#main').innerHTML=html;
+}
+function listByDate(tx){
   const groups={};
   for(const t of tx){(groups[t.date]=groups[t.date]||[]).push(t);}
   const meses=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
   const dias=['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
+  let html='';
   for(const date of Object.keys(groups)){
     const arr=groups[date];
     const d=new Date(date+'T12:00:00');
@@ -559,12 +593,56 @@ function renderList(){
     const head=dias[d.getDay()]+' '+d.getDate()+' '+meses[d.getMonth()];
     html+='<div class="daygroup"><div class="dayhead"><span class="d">'+head+'</span>'+
       '<span class="s">'+(dayNet>=0?'+':'')+clp(dayNet)+'</span></div>';
-    for(const t of arr){
-      html+=txRow(t);
-    }
+    for(const t of arr)html+=txRow(t);
     html+='</div>';
   }
-  $('#main').innerHTML=html;
+  return html;
+}
+function listByCategory(tx){
+  /* agrupa gasto/ingreso por categoría; el resto (transfer/ajuste/deuda) bajo "Otros" */
+  const cgroups={}; const otros=[];
+  for(const t of tx){
+    if((t.kind==='gasto'||t.kind==='ingreso')&&t.categoryId){
+      (cgroups[t.categoryId]=cgroups[t.categoryId]||[]).push(t);
+    } else otros.push(t);
+  }
+  const rows=Object.keys(cgroups).map(cid=>{
+    const arr=cgroups[cid];
+    const c=DB.categories.find(c=>c.id===cid)||{name:'(borrada)',icon:'ellipsis',color:'#777',kind:'gasto'};
+    const total=arr.reduce((s,t)=>s+t.amount,0);
+    return {cid,c,arr,total,kind:c.kind};
+  }).sort((a,b)=>b.total-a.total);
+  /* total para porcentajes, por tipo del propio rubro */
+  const totGasto=rows.filter(r=>r.kind==='gasto').reduce((s,r)=>s+r.total,0);
+  const totIngreso=rows.filter(r=>r.kind==='ingreso').reduce((s,r)=>s+r.total,0);
+  let html='<div class="mlist">';
+  for(const r of rows){
+    const base=r.kind==='gasto'?totGasto:totIngreso;
+    const pct=base?Math.round(r.total/base*100):0;
+    const open=UI.expandedCat===r.cid;
+    html+='<div class="catrow" data-expandcat="'+r.cid+'">'+
+      '<span class="ci" style="color:'+(r.c.color||'#999')+'">'+svg(r.c.icon)+'</span>'+
+      '<div class="mid"><div class="t1">'+esc(r.c.name)+'</div>'+
+      '<div class="t2">'+r.arr.length+' mov · '+pct+'%</div></div>'+
+      '<div class="amt '+(r.kind==='ingreso'?'inc':'exp')+'">'+(r.kind==='ingreso'?'+':'-')+clp(r.total).replace('-','')+'</div>'+
+      '<span class="exp-ch '+(open?'op':'')+'">'+svg('chevron-right')+'</span></div>';
+    if(open){
+      html+='<div class="catexp">';
+      for(const t of r.arr)html+=txRow(t);
+      html+='</div>';
+    }
+  }
+  if(otros.length){
+    const open=UI.expandedCat==='__otros__';
+    html+='<div class="catrow" data-expandcat="__otros__">'+
+      '<span class="ci">'+svg('arrow-left-right')+'</span>'+
+      '<div class="mid"><div class="t1">Otros movimientos</div>'+
+      '<div class="t2">'+otros.length+' mov · transferencias, ajustes y deudas</div></div>'+
+      '<span class="exp-ch '+(open?'op':'')+'">'+svg('chevron-right')+'</span></div>';
+    if(open){html+='<div class="catexp">';for(const t of otros)html+=txRow(t);html+='</div>';}
+  }
+  html+='</div>';
+  return html;
 }
 function txRow(t){
   let icon='ellipsis',name='',sub='',amtCls='exp',amtTxt='';
@@ -581,7 +659,7 @@ function txRow(t){
   } else if(t.kind==='prestamo'||t.kind==='deuda'||t.kind==='abono_cobro'||t.kind==='abono_pago'){
     const p=DB.people.find(p=>p.id===t.personId);
     const pname=p?esc(p.name):'(persona)';
-    const labels={prestamo:'Presté a '+pname,deuda:'Me prestó '+pname,
+    const labels={prestamo:pname+' — Me debe',deuda:pname+' — Le debo',
       abono_cobro:pname+' me pagó',abono_pago:'Le pagué a '+pname};
     const icons={prestamo:'hand-coins',deuda:'hand-coins',abono_cobro:'coins',abono_pago:'coins'};
     icon=icons[t.kind]; name=labels[t.kind];
@@ -693,14 +771,11 @@ function openPersonSheet(personId){
     '<div style="font-size:12px;letter-spacing:.4px;text-transform:uppercase;color:var(--tx-3)">Saldo</div>'+
     '<div style="font-size:28px;font-weight:600;letter-spacing:-.5px;margin-top:3px" class="amt '+ecls+'">'+estado+'</div></div>';
 
-  /* acciones */
+  /* acciones — modelo de 3 conceptos */
   h+='<div class="twocol" style="margin-bottom:8px">'+
-    '<button class="btn ghost" data-debtmove="prestamo" data-pid="'+personId+'">'+svg('hand-coins')+'Prestarle</button>'+
-    '<button class="btn ghost" data-debtmove="deuda" data-pid="'+personId+'">'+svg('hand-coins')+'Pedirle</button></div>';
-  if(b>0)
-    h+='<button class="btn primary" data-debtmove="abono_cobro" data-pid="'+personId+'">'+svg('coins')+'Registrar pago que me hace</button>';
-  else if(b<0)
-    h+='<button class="btn primary" data-debtmove="abono_pago" data-pid="'+personId+'">'+svg('coins')+'Registrar pago que le hago</button>';
+    '<button class="btn primary" data-debtmove="prestamo" data-pid="'+personId+'">'+svg('hand-coins')+'Me debe</button>'+
+    '<button class="btn ghost" data-debtmove="abono_cobro" data-pid="'+personId+'">'+svg('coins')+'Me pagó</button></div>';
+  h+='<button class="btn ghost" data-debtmove="deuda" data-pid="'+personId+'">'+svg('hand-coins')+'Le debo</button>';
   if(b!==0)
     h+='<button class="btn ghost" data-settle="'+personId+'">'+svg('check')+'Saldar todo</button>';
 
@@ -712,7 +787,7 @@ function openPersonSheet(personId){
     h+='<div style="margin:0 -4px">'+movs.map(t=>{
       const d=new Date(t.date+'T12:00:00');
       const card=DB.cards.find(c=>c.id===t.cardId);
-      const labels={prestamo:'Le presté',deuda:'Me prestó',abono_cobro:'Me pagó',abono_pago:'Le pagué'};
+      const labels={prestamo:'Me debe',deuda:'Le debo',abono_cobro:'Me pagó',abono_pago:'Le pagué'};
       const entra=(t.kind==='deuda'||t.kind==='abono_cobro');
       return '<div class="txrow" data-debttx="'+t.id+'"><span class="ci">'+svg(entra?'coins':'hand-coins')+'</span>'+
         '<div class="mid"><div class="t1">'+labels[t.kind]+'</div>'+
@@ -751,20 +826,24 @@ function personDelete(personId){
 
 /* Nuevo movimiento de deuda. dir: prestamo|deuda|abono_cobro|abono_pago */
 function openDebtSheet(dir,personId){
-  sheetState={mode:'debt',dir:dir||'prestamo',
+  dir=dir||'prestamo';
+  sheetState={mode:'debt',dir,
     personId:personId||(DB.people[0]&&DB.people[0].id)||null,
-    amount:0, cardId:'', date:todayISO(), note:''};
+    amount:0, cardId:(dir==='deuda'?'':defaultCardId()), date:todayISO(), note:''};
   openSheet('Movimiento de deuda','<div id="debtform"></div>');
   renderDebtForm();
 }
+/* 3 conceptos:
+   prestamo   = "Me debe"  → la persona te debe más (+). Con tarjeta: sale plata.
+   abono_cobro= "Me pagó"  → te paga (−). Con tarjeta: entra plata.
+   deuda      = "Le debo"  → baja tu patrimonio y reduce lo que te deben (−). Sin tarjeta. */
 function renderDebtForm(){
   const s=sheetState;
-  const dirs=[['prestamo','Le presté'],['deuda','Me prestó'],['abono_cobro','Me pagó'],['abono_pago','Le pagué']];
+  const dirs=[['prestamo','Me debe'],['abono_cobro','Me pagó'],['deuda','Le debo']];
   let h='';
-  /* segmento de dirección */
-  h+='<div class="seg" style="flex-wrap:wrap">'+dirs.map(d=>
-    '<button class="'+(s.dir===d[0]?'on':'')+'" data-debtdir="'+d[0]+'" style="flex:1 0 46%">'+d[1]+'</button>').join('')+'</div>';
-  h+='<div class="amount-display"><div class="cur">CLP</div><div class="num">'+
+  h+='<div class="seg">'+dirs.map(d=>
+    '<button class="'+(s.dir===d[0]?'on':'')+'" data-debtdir="'+d[0]+'">'+d[1]+'</button>').join('')+'</div>';
+  h+='<div class="amount-display"><div class="cur">CLP</div><div class="num" id="debtamt">'+
      (s.amount>0?clp(s.amount):'<span class="faint">$0</span>')+'</div></div>';
   /* persona */
   h+='<div class="field"><label>Persona</label><div class="picker">'+
@@ -772,13 +851,17 @@ function renderDebtForm(){
       '<span class="ci" style="border-radius:50%;font-size:12px;font-weight:600">'+initials(p.name)+'</span>'+
       '<span class="pl">'+esc(p.name)+'</span></button>').join('')+
     '<button class="pick" data-newperson="1"><span class="ci">'+svg('plus')+'</span><span class="pl">Nueva</span></button></div></div>';
-  /* tarjeta OPCIONAL */
-  h+='<div class="field"><label>Tarjeta (opcional)</label><div class="picker">'+
-    '<button class="pick '+(s.cardId===''?'on':'')+'" data-debtcard="__none__"><span class="ci">'+svg('circle-dollar-sign')+
-      '</span><span class="pl">Sin tarjeta</span></button>'+
-    DB.cards.map(c=>'<button class="pick '+(s.cardId===c.id?'on':'')+'" data-debtcard="'+c.id+'">'+
-      '<span class="ci">'+svg(c.icon)+'</span><span class="pl">'+esc(c.name)+'</span></button>').join('')+
-    '</div><div class="hint">'+debtCardHint(s.dir)+'</div></div>';
+  /* tarjeta: solo en "Me debe" y "Me pagó" (en "Le debo" no se mueve plata) */
+  if(s.dir!=='deuda'){
+    h+='<div class="field"><label>Tarjeta (opcional)</label><div class="picker">'+
+      '<button class="pick '+(s.cardId===''?'on':'')+'" data-debtcard="__none__"><span class="ci">'+svg('circle-dollar-sign')+
+        '</span><span class="pl">Sin tarjeta</span></button>'+
+      DB.cards.map(c=>'<button class="pick '+(s.cardId===c.id?'on':'')+'" data-debtcard="'+c.id+'">'+
+        '<span class="ci">'+svg(c.icon)+'</span><span class="pl">'+esc(c.name)+'</span></button>').join('')+
+      '</div><div class="hint">'+debtCardHint(s.dir)+'</div></div>';
+  } else {
+    h+='<div class="hint" style="margin:2px 2px 12px">'+debtCardHint(s.dir)+'</div>';
+  }
   /* fecha + nota */
   h+='<div class="field"><label>Fecha</label><input type="date" id="debtdate" value="'+s.date+'"></div>';
   h+='<div class="field"><label>Nota</label><input type="text" id="debtnote" placeholder="Opcional" value="'+esc(s.note)+'"></div>';
@@ -791,17 +874,16 @@ function renderDebtForm(){
   $('#debtform').innerHTML=h;
 }
 function debtCardHint(dir){
-  if(dir==='prestamo')return 'Si eliges tarjeta, la plata sale de ahí. Sin tarjeta, solo queda como “te deben”.';
-  if(dir==='deuda')return 'Si eliges tarjeta, la plata entra ahí. Sin tarjeta, solo queda como “debes”.';
-  if(dir==='abono_cobro')return 'Si eliges tarjeta, el pago entra ahí. Sin tarjeta, solo baja lo que te deben.';
-  return 'Si eliges tarjeta, el pago sale de ahí. Sin tarjeta, solo baja lo que debes.';
+  if(dir==='prestamo')return 'Con tarjeta: la plata sale de ahí y sube lo que te deben (patrimonio igual). Sin tarjeta: solo sube lo que te deben (sube tu patrimonio).';
+  if(dir==='abono_cobro')return 'Con tarjeta: la plata entra ahí y baja lo que te deben (patrimonio igual). Sin tarjeta: solo baja lo que te deben.';
+  return 'Baja tu patrimonio y reduce lo que te deben. No mueve tus tarjetas ni tu dinero disponible.';
 }
 function debtSave(){
   const s=sheetState;
   if(s.amount<=0||!s.personId){toast('Falta monto o persona');return;}
-  const cardId=s.cardId||null;
-  /* validar débito si la plata sale (prestamo / abono_pago) */
-  if(cardId&&(s.dir==='prestamo'||s.dir==='abono_pago')){
+  const cardId=(s.dir==='deuda')?null:(s.cardId||null);
+  /* validar débito cuando sale plata (prestamo con tarjeta) */
+  if(cardId&&s.dir==='prestamo'){
     const card=DB.cards.find(c=>c.id===cardId);
     if(card&&card.type==='debito'&&cardBalance(cardId)-s.amount<0){
       toast('Saldo insuficiente en '+card.name+' (débito)');return;}
@@ -810,14 +892,40 @@ function debtSave(){
     toCardId:null,personId:s.personId,date:s.date,note:s.note,createdAt:nowISO(),updatedAt:nowISO(),synced:false});
   save(); closeSheet(); render(); toast('Movimiento registrado');
 }
-/* Saldar todo: crea el abono que lleva el saldo a 0 (sin tarjeta por defecto) */
+/* Saldar todo: lleva el saldo a 0 (hoja dedicada, sin selector de dirección) */
 function openSettleSheet(personId){
   const b=personBalance(personId);
   if(b===0){toast('Ya está al día');return;}
-  const dir=b>0?'abono_cobro':'abono_pago';
-  sheetState={mode:'debt',dir,personId,amount:Math.abs(b),cardId:'',date:todayISO(),note:'Saldado'};
-  openSheet('Saldar con '+esc(DB.people.find(p=>p.id===personId).name),'<div id="debtform"></div>');
-  renderDebtForm();
+  const kind=b>0?'abono_cobro':'abono_pago';
+  sheetState={mode:'settle',personId,kind,amount:Math.abs(b),cardId:defaultCardId(),date:todayISO()};
+  openSheet('Saldar con '+esc(DB.people.find(p=>p.id===personId).name),'<div id="settleform"></div>');
+  renderSettleForm();
+}
+function renderSettleForm(){
+  const s=sheetState;
+  const txt=s.kind==='abono_cobro'?'Te paga todo lo que te debía y queda al día.':'Le pagas todo lo que le debías y queda al día.';
+  let h='<div class="amount-display"><div class="cur">CLP</div><div class="num">'+clp(s.amount)+'</div></div>';
+  h+='<div class="hint" style="text-align:center;margin:0 4px 12px">'+txt+'</div>';
+  h+='<div class="field"><label>Tarjeta (opcional)</label><div class="picker">'+
+    '<button class="pick '+(s.cardId===''?'on':'')+'" data-settlecard="__none__"><span class="ci">'+svg('circle-dollar-sign')+
+      '</span><span class="pl">Sin tarjeta</span></button>'+
+    DB.cards.map(c=>'<button class="pick '+(s.cardId===c.id?'on':'')+'" data-settlecard="'+c.id+'">'+
+      '<span class="ci">'+svg(c.icon)+'</span><span class="pl">'+esc(c.name)+'</span></button>').join('')+
+    '</div></div>';
+  h+='<button class="btn primary" id="settlesave">Saldar</button>';
+  $('#settleform').innerHTML=h;
+}
+function settleSave(){
+  const s=sheetState;
+  const cardId=s.cardId||null;
+  if(cardId&&s.kind==='abono_pago'){
+    const card=DB.cards.find(c=>c.id===cardId);
+    if(card&&card.type==='debito'&&cardBalance(cardId)-s.amount<0){
+      toast('Saldo insuficiente en '+card.name+' (débito)');return;}
+  }
+  DB.transactions.push({id:uid(),kind:s.kind,amount:s.amount,categoryId:null,cardId:cardId,
+    toCardId:null,personId:s.personId,date:s.date,note:'Saldado',createdAt:nowISO(),updatedAt:nowISO(),synced:false});
+  save(); closeSheet(); render(); toast('Saldado');
 }
 
 
@@ -858,7 +966,7 @@ function openTxSheet(kind,existing,preCat){
   sheetState={mode:'tx',kind,id:existing?existing.id:null,
     amount:existing?existing.amount:0,
     categoryId:existing?existing.categoryId:(preCat||null),
-    cardId:existing?existing.cardId:(DB.cards[0]&&DB.cards[0].id),
+    cardId:existing?existing.cardId:defaultCardId(),
     date:existing?existing.date:todayISO(),
     note:existing?existing.note:''};
   renderTxSheet();
@@ -872,7 +980,7 @@ function renderTxForm(){
   if(!s.categoryId&&cats[0])s.categoryId=cats[0].id;
   let h='';
   h+='<div class="amount-display"><div class="cur">CLP</div>'+
-     '<div class="num">'+(s.amount>0?clp(s.amount):'<span class="faint">$0</span>')+'</div></div>';
+     '<div class="num" id="amtnum">'+(s.amount>0?clp(s.amount):'<span class="faint">$0</span>')+'</div></div>';
   /* categoría */
   h+='<div class="field"><label>Categoría</label><div class="picker">'+
     cats.map(c=>'<button class="pick '+(s.categoryId===c.id?'on':'')+'" data-pickcat="'+c.id+'">'+
@@ -973,7 +1081,8 @@ function openCardSheet(existing){
   sheetState={mode:'card',id:existing?existing.id:null,
     name:existing?existing.name:'',type:existing?existing.type:'debito',
     icon:existing?existing.icon:'wallet',opening:existing?existing.opening:0,
-    openingStr:existing?String(existing.opening||0):''};
+    openingStr:existing?String(existing.opening||0):'',
+    isDefault:existing?(DB.meta.defaultCardId===existing.id):(DB.cards.length===0)};
   openSheet(existing?'Editar tarjeta':'Nueva tarjeta','<div id="cardform"></div>');
   renderCardForm();
 }
@@ -992,6 +1101,10 @@ function renderCardForm(){
   h+='<div class="field"><label>Ícono</label><div class="picker">'+
     cardIcons.map(n=>'<button class="pick '+(s.icon===n?'on':'')+'" data-cardicon="'+n+'">'+
       '<span class="ci">'+svg(n)+'</span></button>').join('')+'</div></div>';
+  h+='<div class="field"><label>Tarjeta por defecto</label><div class="seg">'+
+    '<button class="'+(s.isDefault?'on':'')+'" data-carddefault="1">Sí</button>'+
+    '<button class="'+(!s.isDefault?'on':'')+'" data-carddefault="0">No</button></div>'+
+    '<div class="hint">La que aparece preseleccionada al registrar gastos, ingresos y deudas.</div></div>';
   h+='<button class="btn primary" id="cardsave" '+(s.name.trim()?'':'disabled')+'>'+
      (s.id?'Guardar cambios':'Crear tarjeta')+'</button>';
   if(s.id){
@@ -1003,8 +1116,12 @@ function renderCardForm(){
 function cardSave(){
   const s=sheetState; const name=s.name.trim(); if(!name)return;
   const opening=parseInt(s.openingStr||'0',10)||0;
+  let id=s.id;
   if(s.id){const c=DB.cards.find(c=>c.id===s.id);Object.assign(c,{name,type:s.type,icon:s.icon,opening});}
-  else{DB.cards.push({id:uid(),name,type:s.type,icon:s.icon,opening,createdAt:nowISO()});}
+  else{id=uid();DB.cards.push({id,name,type:s.type,icon:s.icon,opening,createdAt:nowISO()});}
+  /* tarjeta por defecto */
+  if(s.isDefault)DB.meta.defaultCardId=id;
+  else if(DB.meta.defaultCardId===id)DB.meta.defaultCardId=null;
   save(); closeSheet(); render(); toast('Tarjeta guardada');
 }
 function cardDelete(){
@@ -1012,6 +1129,7 @@ function cardDelete(){
   const used=DB.transactions.some(t=>t.cardId===s.id||t.toCardId===s.id);
   if(used){toast('No se puede: la tarjeta tiene movimientos');return;}
   DB.cards=DB.cards.filter(c=>c.id!==s.id);
+  if(DB.meta.defaultCardId===s.id)DB.meta.defaultCardId=null;
   save(); closeSheet(); render(); toast('Tarjeta eliminada');
 }
 function openAdjustSheet(card){
@@ -1046,7 +1164,7 @@ function openTransferSheet(){
 function renderXferForm(){
   const s=sheetState;
   const opts=(sel)=>DB.cards.map(c=>'<option value="'+c.id+'" '+(sel===c.id?'selected':'')+'>'+esc(c.name)+' · '+clp(cardBalance(c.id))+'</option>').join('');
-  let h='<div class="amount-display"><div class="cur">CLP</div><div class="num">'+
+  let h='<div class="amount-display"><div class="cur">CLP</div><div class="num" id="xferamt">'+
     (s.amount>0?clp(s.amount):'<span class="faint">$0</span>')+'</div></div>';
   h+='<div class="field"><label>Desde</label><select id="xfrom">'+opts(s.from)+'</select></div>';
   h+='<div class="field"><label>Hacia</label><select id="xto">'+opts(s.to)+'</select></div>';
@@ -1080,10 +1198,11 @@ function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show'
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-period],[data-shift],[data-view],[data-go],[data-add],[data-mtab],'+
     '[data-editcat],[data-newcat],[data-editcard],[data-newcard],[data-dotransfer],[data-tx],'+
-    '[data-pickcat],[data-pickcard],[data-k],[data-icon],[data-gray],[data-cardtype],[data-cardicon],'+
+    '[data-pickcat],[data-pickcard],[data-k],[data-icon],[data-gray],[data-cardtype],[data-cardicon],[data-carddefault],'+
     '[data-xk],[data-go],[data-more],'+
     '[data-newdebt],[data-newperson],[data-person],[data-debtmove],[data-settle],[data-editperson],'+
-    '[data-delperson],[data-debttx],[data-debtdir],[data-debtperson],[data-debtcard],[data-dk],[data-addcat]');
+    '[data-delperson],[data-debttx],[data-debtdir],[data-debtperson],[data-debtcard],[data-dk],[data-addcat],[data-settlecard],'+
+    '[data-lfilter],[data-lgroup],[data-expandcat]');
 
   /* botones con id directo */
   if(e.target.closest('#sheetClose')){closeSheet();return;}
@@ -1098,6 +1217,7 @@ document.addEventListener('click',e=>{
   if(e.target.closest('#xsave')){xferSave();return;}
   if(e.target.closest('#personsave')){personSave();return;}
   if(e.target.closest('#debtsave')){debtSave();return;}
+  if(e.target.closest('#settlesave')){settleSave();return;}
 
   if(!el)return;
   const d=el.dataset;
@@ -1125,6 +1245,7 @@ document.addEventListener('click',e=>{
   else if(d.gray!=null){sheetState.color=d.gray;renderCatForm();}
   else if(d.cardtype!=null){sheetState.type=d.cardtype;renderCardForm();}
   else if(d.cardicon!=null){sheetState.icon=d.cardicon;renderCardForm();}
+  else if(d.carddefault!=null){sheetState.isDefault=(d.carddefault==='1');renderCardForm();}
   /* deudas */
   else if(d.newdebt!=null){if(!DB.people.length){openPersonEdit();}else{openDebtSheet('prestamo');}}
   else if(d.newperson!=null){openPersonEdit();}
@@ -1134,11 +1255,20 @@ document.addEventListener('click',e=>{
   else if(d.editperson!=null){openPersonEdit(d.editperson);}
   else if(d.delperson!=null){personDelete(d.delperson);}
   else if(d.debttx!=null){toast('Edición de movimientos de deuda: próximamente');}
-  else if(d.debtdir!=null){sheetState.dir=d.debtdir;renderDebtForm();}
+  else if(d.debtdir!=null){
+    sheetState.dir=d.debtdir;
+    if(d.debtdir==='deuda')sheetState.cardId='';
+    else if(sheetState.cardId==='')sheetState.cardId=defaultCardId();
+    renderDebtForm();
+  }
   else if(d.debtperson!=null){sheetState.personId=d.debtperson;renderDebtForm();}
   else if(d.debtcard!=null){sheetState.cardId=(d.debtcard==='__none__'?'':d.debtcard);renderDebtForm();}
+  else if(d.settlecard!=null){sheetState.cardId=(d.settlecard==='__none__'?'':d.settlecard);renderSettleForm();}
   else if(d.dk!=null){keypadD(d.dk);}
   else if(d.addcat!=null){openTxSheet('gasto',null,d.addcat);}
+  else if(d.lfilter!=null){UI.listFilter=d.lfilter;UI.expandedCat=null;render();}
+  else if(d.lgroup!=null){UI.listGroup=d.lgroup;UI.expandedCat=null;render();}
+  else if(d.expandcat!=null){UI.expandedCat=(UI.expandedCat===d.expandcat?null:d.expandcat);render();}
 });
 $('#scrim').addEventListener('click',closeSheet);
 
@@ -1163,7 +1293,8 @@ function keypad(k){
   else if(k==='000')s.amount=s.amount*1000;
   else s.amount=s.amount*10+parseInt(k,10);
   if(s.amount>999999999)s.amount=999999999;
-  renderTxForm();
+  const el=$('#amtnum'); if(el)el.innerHTML=(s.amount>0?clp(s.amount):'<span class="faint">$0</span>');
+  const sv=$('#txsave'); if(sv)sv.disabled=!(s.amount>0);
 }
 function keypadX(k){
   const s=sheetState;
@@ -1172,7 +1303,8 @@ function keypadX(k){
   else if(k==='000')s.amount=s.amount*1000;
   else s.amount=s.amount*10+parseInt(k,10);
   if(s.amount>999999999)s.amount=999999999;
-  renderXferForm();
+  const el=$('#xferamt'); if(el)el.innerHTML=(s.amount>0?clp(s.amount):'<span class="faint">$0</span>');
+  const sv=$('#xsave'); if(sv)sv.disabled=!(s.amount>0);
 }
 function keypadD(k){
   const s=sheetState;
@@ -1180,7 +1312,8 @@ function keypadD(k){
   else if(k==='000')s.amount=s.amount*1000;
   else s.amount=s.amount*10+parseInt(k,10);
   if(s.amount>999999999)s.amount=999999999;
-  renderDebtForm();
+  const el=$('#debtamt'); if(el)el.innerHTML=(s.amount>0?clp(s.amount):'<span class="faint">$0</span>');
+  const sv=$('#debtsave'); if(sv)sv.disabled=!(s.amount>0&&s.personId);
 }
 
 /* ---------- Service worker ---------- */
